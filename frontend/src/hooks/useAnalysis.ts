@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import axios, { AxiosError } from 'axios';
 import type { AnalysisResponse } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const API_BASE_URL = 'https://bias-guard-ai.onrender.com';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
