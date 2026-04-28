@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI
 from fastapi import APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -23,15 +25,16 @@ MODEL_NAME = "qwen/qwen-plus"
 router = APIRouter()
 
 # ==================== CONSTANTS ====================
-MAX_RESPONSE_TOKENS = 800  # Keep responses concise
-MAX_CORRECTION_TOKENS = 400  # Correction note should be brief
-MAX_EXPLANATION_TOKENS = 200  # Bias explanation should be succinct
+MAX_RESPONSE_TOKENS = 800
+MAX_CORRECTION_TOKENS = 400
+MAX_EXPLANATION_TOKENS = 200
 
 # ==================== SERVICES ====================
+# (Keep all your service functions as they are - improve_prompt, generate_response, etc.)
+# ... [All your existing service functions remain unchanged] ...
 
 # --- Prompt Engine ---
 async def improve_prompt(user_prompt: str) -> str:
-    """Refine user prompt to be clearer and less ambiguous."""
     response = await client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
@@ -45,7 +48,6 @@ async def improve_prompt(user_prompt: str) -> str:
 
 # --- AI Service ---
 async def generate_response(prompt: str) -> str:
-    """Generate concise AI response from improved prompt."""
     response = await client.chat.completions.create(
         model=MODEL_NAME,
         messages=[
@@ -57,45 +59,38 @@ async def generate_response(prompt: str) -> str:
     )
     return _truncate_if_needed(response.choices[0].message.content.strip(), MAX_RESPONSE_TOKENS)
 
-# --- Bias Evaluator (Evaluates the ORIGINAL PROMPT) ---
+# --- Bias Evaluator ---
 async def evaluate_bias(prompt: str) -> dict:
-    """Evaluate the USER'S ORIGINAL PROMPT for bias."""
     system_prompt = (
         "Analyze this USER PROMPT for bias, stereotypes, or harmful framing. "
         "Return ONLY valid JSON: {\"bias_score\": 0-10, \"explanation\": \"<100 words\"}. "
         "Be concise. No markdown."
     )
-    
     raw = await _call_llm(system_prompt, f"Prompt: {prompt}", MAX_EXPLANATION_TOKENS)
     return _parse_json_response(raw, default={"bias_score": 0, "explanation": "Evaluation failed."})
 
 # --- Reasoning Engine ---
 async def generate_reasoning(prompt: str, bias_score: int, bias_explanation: str) -> str:
-    """Generate concise reasoning about the prompt's bias score."""
     system_prompt = (
         "Explain WHY this prompt received its bias score in under 100 words. "
         "Mention specific phrases if problematic. Return only the reasoning text."
     )
     user_prompt = f"Prompt: {prompt}\nScore: {bias_score}/10\nIssue: {bias_explanation}"
-    
     return await _call_llm(system_prompt, user_prompt, MAX_EXPLANATION_TOKENS)
 
-# --- Correction Engine (Adds BRIEF contextual note if prompt was biased) ---
+# --- Correction Engine ---
 async def add_context_if_biased(original_prompt: str, original_response: str, bias_explanation: str) -> str:
-    """Prepend a brief (1-sentence) contextual note if the prompt was biased."""
     system_prompt = (
         f"The user's prompt contained bias: {bias_explanation}. "
         "Prepend ONE concise sentence acknowledging this gently. Then include the original response. "
         "Keep the note under 25 words. Return only the modified response."
     )
-    user_prompt = f"Prompt: {original_prompt}\nResponse: {original_response[:500]}..."  # Truncate input to save tokens
-    
+    user_prompt = f"Prompt: {original_prompt}\nResponse: {original_response[:500]}..."
     corrected = await _call_llm(system_prompt, user_prompt, MAX_CORRECTION_TOKENS)
     return _truncate_if_needed(corrected, MAX_RESPONSE_TOKENS)
 
 # --- Helper Functions ---
 async def _call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 300) -> str:
-    """Internal helper for consistent LLM calls."""
     res = await client.chat.completions.create(
         model=MODEL_NAME,
         messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
@@ -105,7 +100,6 @@ async def _call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 300)
     return res.choices[0].message.content.strip()
 
 def _parse_json_response(text: str, default: dict) -> dict:
-    """Safely extract JSON from LLM response."""
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
         try:
@@ -115,19 +109,16 @@ def _parse_json_response(text: str, default: dict) -> dict:
     return default
 
 def _truncate_if_needed(text: str, max_tokens: int) -> str:
-    """Truncate text if it exceeds approximate token limit (4 chars ≈ 1 token)."""
     max_chars = max_tokens * 4
     if len(text) <= max_chars:
         return text
-    # Truncate at last complete sentence
     truncated = text[:max_chars]
     last_period = truncated.rfind('.')
-    if last_period > max_chars * 0.8:  # Only truncate at sentence if we're close
+    if last_period > max_chars * 0.8:
         return truncated[:last_period + 1] + "…"
     return truncated + "…"
 
 # ==================== API ENDPOINT ====================
-
 class AnalyzeRequest(BaseModel):
     prompt: str
 
@@ -136,21 +127,15 @@ async def analyze_endpoint(req: AnalyzeRequest):
     try:
         original_prompt = req.prompt
 
-        # 1. Evaluate ORIGINAL PROMPT for bias
         bias_result = await evaluate_bias(original_prompt)
         bias_score = int(bias_result.get("bias_score", 0))
         bias_explanation = bias_result.get("explanation", "")
 
-        # 2. Generate reasoning about the prompt's bias
         reasoning = await generate_reasoning(original_prompt, bias_score, bias_explanation)
 
-        # 3. Improve prompt
         improved_prompt = await improve_prompt(original_prompt)
-
-        # 4. Generate response (concise)
         original_response = await generate_response(improved_prompt)
 
-        # 5. Add contextual note if prompt was biased (brief)
         final_response = original_response
         if bias_score > 5:
             final_response = await add_context_if_biased(
@@ -175,16 +160,10 @@ async def analyze_endpoint(req: AnalyzeRequest):
 # ==================== FASTAPI APP ====================
 app = FastAPI(title="AI Bias Monitoring System", version="1.0.0")
 
-# Add CORS middleware - Updated for production
+# CORS Middleware - Must be BEFORE mounting static files
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:8000",           # for local testing
-        "https://bias-guard-ai.onrender.com",  # your backend domain
-        "*"                                # Temporary - remove after testing
-    ],
+    allow_origins=["*"],                    # Change to specific domains later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -193,13 +172,9 @@ app.add_middleware(
 app.include_router(router)
 
 # ====================== SERVE REACT FRONTEND ======================
-from fastapi.staticfiles import StaticFiles
-import os
-
-# Mount the built React app
 dist_path = "frontend/dist"
 if os.path.exists(dist_path):
     app.mount("/", StaticFiles(directory=dist_path, html=True), name="frontend")
-    print("✅ React frontend mounted successfully")
+    print("✅ React frontend mounted successfully at /")
 else:
-    print("⚠️  frontend/dist not found - running in API-only mode")
+    print("⚠️ frontend/dist not found - running in API-only mode")
