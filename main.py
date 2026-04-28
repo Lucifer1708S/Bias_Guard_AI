@@ -175,10 +175,16 @@ async def analyze_endpoint(req: AnalyzeRequest):
 # ==================== FASTAPI APP ====================
 app = FastAPI(title="AI Bias Monitoring System", version="1.0.0")
 
-# Add CORS middleware
+# Add CORS middleware - Updated for production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # Change to specific domains later
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000",           # for local testing
+        "https://bias-guard-ai.onrender.com",  # your backend domain
+        "*"                                # Temporary - remove after testing
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
