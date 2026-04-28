@@ -178,10 +178,22 @@ app = FastAPI(title="AI Bias Monitoring System", version="1.0.0")
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173","https://bias-guard-ui.onrender.com","*"],
+    allow_origins=["*"],   # Change to specific domains later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(router)
+
+# ====================== SERVE REACT FRONTEND ======================
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Mount the built React app
+dist_path = "frontend/dist"
+if os.path.exists(dist_path):
+    app.mount("/", StaticFiles(directory=dist_path, html=True), name="frontend")
+    print("✅ React frontend mounted successfully")
+else:
+    print("⚠️  frontend/dist not found - running in API-only mode")
