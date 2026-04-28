@@ -30,10 +30,6 @@ MAX_CORRECTION_TOKENS = 400
 MAX_EXPLANATION_TOKENS = 200
 
 # ==================== SERVICES ====================
-# (Keep all your service functions as they are - improve_prompt, generate_response, etc.)
-# ... [All your existing service functions remain unchanged] ...
-
-# --- Prompt Engine ---
 async def improve_prompt(user_prompt: str) -> str:
     response = await client.chat.completions.create(
         model=MODEL_NAME,
@@ -46,7 +42,6 @@ async def improve_prompt(user_prompt: str) -> str:
     )
     return response.choices[0].message.content.strip()
 
-# --- AI Service ---
 async def generate_response(prompt: str) -> str:
     response = await client.chat.completions.create(
         model=MODEL_NAME,
@@ -59,7 +54,6 @@ async def generate_response(prompt: str) -> str:
     )
     return _truncate_if_needed(response.choices[0].message.content.strip(), MAX_RESPONSE_TOKENS)
 
-# --- Bias Evaluator ---
 async def evaluate_bias(prompt: str) -> dict:
     system_prompt = (
         "Analyze this USER PROMPT for bias, stereotypes, or harmful framing. "
@@ -69,7 +63,6 @@ async def evaluate_bias(prompt: str) -> dict:
     raw = await _call_llm(system_prompt, f"Prompt: {prompt}", MAX_EXPLANATION_TOKENS)
     return _parse_json_response(raw, default={"bias_score": 0, "explanation": "Evaluation failed."})
 
-# --- Reasoning Engine ---
 async def generate_reasoning(prompt: str, bias_score: int, bias_explanation: str) -> str:
     system_prompt = (
         "Explain WHY this prompt received its bias score in under 100 words. "
@@ -78,7 +71,6 @@ async def generate_reasoning(prompt: str, bias_score: int, bias_explanation: str
     user_prompt = f"Prompt: {prompt}\nScore: {bias_score}/10\nIssue: {bias_explanation}"
     return await _call_llm(system_prompt, user_prompt, MAX_EXPLANATION_TOKENS)
 
-# --- Correction Engine ---
 async def add_context_if_biased(original_prompt: str, original_response: str, bias_explanation: str) -> str:
     system_prompt = (
         f"The user's prompt contained bias: {bias_explanation}. "
@@ -89,7 +81,6 @@ async def add_context_if_biased(original_prompt: str, original_response: str, bi
     corrected = await _call_llm(system_prompt, user_prompt, MAX_CORRECTION_TOKENS)
     return _truncate_if_needed(corrected, MAX_RESPONSE_TOKENS)
 
-# --- Helper Functions ---
 async def _call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 300) -> str:
     res = await client.chat.completions.create(
         model=MODEL_NAME,
@@ -138,19 +129,14 @@ async def analyze_endpoint(req: AnalyzeRequest):
 
         final_response = original_response
         if bias_score > 5:
-            final_response = await add_context_if_biased(
-                original_prompt, original_response, bias_explanation
-            )
+            final_response = await add_context_if_biased(original_prompt, original_response, bias_explanation)
 
         return {
             "originalPrompt": original_prompt,
             "improvedPrompt": improved_prompt,
             "originalResponse": original_response,
             "finalResponse": final_response,
-            "bias": {
-                "bias_score": bias_score,
-                "explanation": bias_explanation
-            },
+            "bias": {"bias_score": bias_score, "explanation": bias_explanation},
             "reasoning": reasoning
         }
     except Exception as e:
@@ -160,10 +146,10 @@ async def analyze_endpoint(req: AnalyzeRequest):
 # ==================== FASTAPI APP ====================
 app = FastAPI(title="AI Bias Monitoring System", version="1.0.0")
 
-# CORS Middleware - Must be BEFORE mounting static files
+# CORS MUST COME BEFORE mounting static files
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],                    # Change to specific domains later
+    allow_origins=["*"],   # For now - change to specific URLs later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -175,6 +161,6 @@ app.include_router(router)
 dist_path = "frontend/dist"
 if os.path.exists(dist_path):
     app.mount("/", StaticFiles(directory=dist_path, html=True), name="frontend")
-    print("✅ React frontend mounted successfully at /")
+    print("✅ React frontend mounted successfully")
 else:
-    print("⚠️ frontend/dist not found - running in API-only mode")
+    print("⚠️ frontend/dist not found")
